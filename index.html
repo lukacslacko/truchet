@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Connected Tile Board - Full Screen</title>
+<style>
+    body {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 100vh;
+        background-color: #f0f0f0;
+        margin: 0;
+        overflow: hidden; /* Prevent scrollbars */
+    }
+    svg#board {
+        background-color: #fff;
+        /* Border removed, as it might interfere with precise fitting */
+        /* border: 1px solid #ccc; */
+        display: block; /* Helps prevent extra space below SVG */
+    }
+    path {
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        fill: none;
+    }
+</style>
+</head>
+<body>
+
+<svg id="board">
+    </svg>
+
+<script>
+    // --- Configuration ---
+    const TILE_SIZE = 30; // Desired visual size of each tile
+    const MIN_ROWS = 5;   // Minimum grid size
+    const MIN_COLS = 5;
+    const PADDING = 5;    // Small padding within the SVG viewBox
+
+    // Stroke widths
+    const NORMAL_STROKE_WIDTH = 2;
+    const BOLD_STROKE_WIDTH = 5;
+
+    // --- Global Variables (will be set in initApp) ---
+    let ROWS, COLS;
+    let BOARD_WIDTH, BOARD_HEIGHT;
+    let NUM_H_NODES, NUM_V_NODES, NUM_NODES;
+    let grid = [];
+    let adj = [];
+    let visited = [];
+    let component = [];
+    let componentInfo = [];
+
+    const SVG_NS = "http://www.w3.org/2000/svg";
+    const svg = document.getElementById('board');
+
+    // --- Helper Functions ---
+
+    function getNodeIndexH(r, c) {
+        // Check against dynamically set ROWS/COLS
+        if (r < 0 || r > ROWS || c < 0 || c >= COLS) return -1;
+        return r * COLS + c;
+    }
+
+    function getNodeIndexV(r, c) {
+        // Check against dynamically set ROWS/COLS
+        if (r < 0 || r >= ROWS || c < 0 || c > COLS) return -1;
+        return NUM_H_NODES + r * (COLS + 1) + c;
+    }
+
+     function isBoundaryNode(nodeIndex) {
+        if (nodeIndex < 0 || nodeIndex >= NUM_NODES) return false;
+        if (nodeIndex < NUM_H_NODES) {
+            const r = Math.floor(nodeIndex / COLS);
+            return r === 0 || r === ROWS; // Use dynamic ROWS
+        } else {
+            const vIndex = nodeIndex - NUM_H_NODES;
+            const c = vIndex % (COLS + 1);
+            return c === 0 || c === COLS; // Use dynamic COLS
+        }
+    }
+
+    function getColor(index, total) {
+        const safeTotal = Math.max(1, total);
+        const hue = (index * (360 / safeTotal)) % 360;
+        return `hsl(${hue}, 75%, 55%)`;
+    }
+
+    // --- Core Logic Functions (no change needed inside them) ---
+
+    function generateGrid() {
+        grid = Array(ROWS).fill(null).map(() => Array(COLS).fill(0));
+        for (let r = 0; r < ROWS; r++) {
+            for (let c = 0; c < COLS; c++) {
+                grid[r][c] = Math.floor(Math.random() * 3);
+            }
+        }
+    }
+
+    function buildGraph() {
+        adj = Array(NUM_NODES).fill(null).map(() => []);
+        for (let r = 0; r < ROWS; r++) {
+            for (let c = 0; c < COLS; c++) {
+                const tileType = grid[r][c];
+                const topNode = getNodeIndexH(r, c);
+                const bottomNode = getNodeIndexH(r + 1, c);
+                const leftNode = getNodeIndexV(r, c);
+                const rightNode = getNodeIndexV(r, c + 1);
+
+                const addEdge = (u, v) => {
+                     // Added check for NUM_NODES validity
+                    if (u !== -1 && v !== -1 && u < NUM_NODES && v < NUM_NODES) {
+                        if (!adj[u].includes(v)) adj[u].push(v);
+                        if (!adj[v].includes(u)) adj[v].push(u);
+                    }
+                };
+
+                if (tileType === 0) { addEdge(topNode, bottomNode); addEdge(leftNode, rightNode); }
+                else if (tileType === 1) { addEdge(topNode, leftNode); addEdge(bottomNode, rightNode); }
+                else { addEdge(topNode, rightNode); addEdge(bottomNode, leftNode); }
+            }
+        }
+    }
+
+    function findComponents() {
+        visited = Array(NUM_NODES).fill(false);
+        component = Array(NUM_NODES).fill(-1);
+        componentInfo = [];
+        let componentId = 0;
+
+        for (let i = 0; i < NUM_NODES; i++) {
+            if (!visited[i] && i < adj.length && adj[i]) { // Check node validity
+                let touchesBoundary = false;
+                const queue = [i];
+                visited[i] = true;
+                component[i] = componentId;
+                let head = 0;
+
+                while(head < queue.length){
+                    const u = queue[head++];
+                    if (u < 0 || u >= NUM_NODES) continue;
+                    if (isBoundaryNode(u)) touchesBoundary = true;
+
+                    if (adj[u]) {
+                        for (const v of adj[u]) {
+                            if (v >= 0 && v < NUM_NODES && !visited[v]) {
+                                visited[v] = true;
+                                component[v] = componentId;
+                                queue.push(v);
+                            }
+                        }
+                    }
+                }
+                componentInfo.push({ id: componentId, isBoundary: touchesBoundary, color: 'gray' });
+                componentId++;
+            } else if (!visited[i]) {
+                 visited[i] = true; // Mark potentially invalid nodes visited
+            }
+        }
+
+        const totalComponents = componentInfo.length;
+        componentInfo.forEach((info) => {
+            info.color = getColor(info.id, totalComponents);
+        });
+        // console.log(`Found ${totalComponents} components.`);
+    }
+
+     function drawBoard() {
+        svg.innerHTML = ''; // Clear previous drawings
+
+        // Set SVG size and viewBox based on calculated dimensions
+        svg.setAttribute('width', BOARD_WIDTH);
+        svg.setAttribute('height', BOARD_HEIGHT);
+        // Adjust viewBox slightly for padding
+        svg.setAttribute('viewBox', `${-PADDING} ${-PADDING} ${BOARD_WIDTH + 2 * PADDING} ${BOARD_HEIGHT + 2 * PADDING}`);
+
+
+        const createPath = (d, strokeColor, strokeWidth) => {
+            const path = document.createElementNS(SVG_NS, 'path');
+            path.setAttribute('d', d);
+            path.setAttribute('stroke', strokeColor);
+            path.setAttribute('stroke-width', strokeWidth);
+            svg.appendChild(path);
+        };
+
+        for (let r = 0; r < ROWS; r++) {
+            for (let c = 0; c < COLS; c++) {
+                const tileType = grid[r][c];
+
+                const cx = (c + 0.5) * TILE_SIZE;
+                const cy = (r + 0.5) * TILE_SIZE;
+                const topX = cx;    const topY = r * TILE_SIZE;
+                const botX = cx;    const botY = (r + 1) * TILE_SIZE;
+                const leftX = c * TILE_SIZE; const leftY = cy;
+                const rightX = (c + 1) * TILE_SIZE; const rightY = cy;
+                const radius = TILE_SIZE / 2;
+
+                const topNode = getNodeIndexH(r, c);
+                const bottomNode = getNodeIndexH(r + 1, c);
+                const leftNode = getNodeIndexV(r, c);
+                const rightNode = getNodeIndexV(r, c + 1);
+
+                const getStyle = (nodeIndex) => {
+                    let color = '#888888';
+                    let width = NORMAL_STROKE_WIDTH;
+                    // Check against dynamic NUM_NODES
+                    if (nodeIndex !== -1 && nodeIndex < NUM_NODES && component[nodeIndex] !== -1) {
+                        const compId = component[nodeIndex];
+                        const info = componentInfo.find(info => info.id === compId);
+                        if (info) {
+                            color = info.color;
+                            width = info.isBoundary ? NORMAL_STROKE_WIDTH : BOLD_STROKE_WIDTH;
+                        }
+                    }
+                    return { color, width };
+                };
+
+                // Draw connections (logic unchanged, relies on correct coords/nodes)
+                if (tileType === 0) { // '+'
+                    let style = getStyle(topNode);
+                    createPath(`M ${topX} ${topY} L ${botX} ${botY}`, style.color, style.width);
+                    style = getStyle(leftNode);
+                    createPath(`M ${leftX} ${leftY} L ${rightX} ${rightY}`, style.color, style.width);
+                } else if (tileType === 1) { // Top-Left / Bottom-Right connection (Sweep 1)
+                    let style = getStyle(topNode);
+                    createPath(`M ${topX} ${topY} A ${radius} ${radius} 0 0 1 ${leftX} ${leftY}`, style.color, style.width);
+                    style = getStyle(bottomNode);
+                    createPath(`M ${botX} ${botY} A ${radius} ${radius} 0 0 1 ${rightX} ${rightY}`, style.color, style.width);
+                } else { // tileType === 2: Top-Right / Bottom-Left connection (Sweep 0)
+                    let style = getStyle(topNode);
+                    createPath(`M ${topX} ${topY} A ${radius} ${radius} 0 0 0 ${rightX} ${rightY}`, style.color, style.width);
+                    style = getStyle(bottomNode);
+                    createPath(`M ${botX} ${botY} A ${radius} ${radius} 0 0 0 ${leftX} ${leftY}`, style.color, style.width);
+                }
+            }
+        }
+        // console.log("Board drawn.");
+    }
+
+    // --- Initialization and Resize ---
+
+    function initApp() {
+        console.log("Initializing App...");
+        // Calculate dimensions based on window size
+        const availableWidth = window.innerWidth;
+        const availableHeight = window.innerHeight;
+
+        // Calculate rows/cols, ensuring minimum size
+        COLS = Math.max(MIN_COLS, Math.floor(availableWidth / TILE_SIZE));
+        ROWS = Math.max(MIN_ROWS, Math.floor(availableHeight / TILE_SIZE));
+
+        // Recalculate board size and node counts
+        BOARD_WIDTH = COLS * TILE_SIZE;
+        BOARD_HEIGHT = ROWS * TILE_SIZE;
+        NUM_H_NODES = (ROWS + 1) * COLS;
+        NUM_V_NODES = ROWS * (COLS + 1);
+        NUM_NODES = NUM_H_NODES + NUM_V_NODES;
+
+        console.log(`Grid Size: ${ROWS}x${COLS}, Board: ${BOARD_WIDTH}x${BOARD_HEIGHT}, Nodes: ${NUM_NODES}`);
+
+        // Run the setup sequence
+        generateGrid();
+        buildGraph();
+        findComponents();
+        drawBoard(); // This function now also sets the SVG size/viewBox
+    }
+
+    // Initial load
+    initApp();
+
+    // Basic resize handling (no debounce)
+    window.addEventListener('resize', initApp);
+
+</script>
+
+</body>
+</html>
